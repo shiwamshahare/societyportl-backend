@@ -1,0 +1,395 @@
+-- Database Schema for Portl Society Management System
+-- PostgreSQL Database
+
+-- Enable UUID extension
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- Profiles table (replaces Supabase auth.users + profiles)
+CREATE TABLE profiles (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    email VARCHAR(255) UNIQUE NOT NULL,
+    password_hash VARCHAR(255) NOT NULL,
+    full_name VARCHAR(255) NOT NULL,
+    phone VARCHAR(20),
+    role VARCHAR(50) DEFAULT 'resident' CHECK (role IN ('resident', 'guard', 'admin')),
+    status VARCHAR(20) DEFAULT 'active' CHECK (status IN ('active', 'inactive', 'suspended')),
+    avatar_url TEXT,
+    email_verified BOOLEAN DEFAULT FALSE,
+    phone_verified BOOLEAN DEFAULT FALSE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    last_login_at TIMESTAMP WITH TIME ZONE
+);
+
+-- Societies table (housing societies/communities)
+CREATE TABLE societies (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    name VARCHAR(255) NOT NULL,
+    address TEXT NOT NULL,
+    city VARCHAR(100),
+    state VARCHAR(100),
+    postal_code VARCHAR(20),
+    country VARCHAR(100) DEFAULT 'India',
+    contact_number VARCHAR(20),
+    email VARCHAR(255),
+    website VARCHAR(255),
+    established_year INTEGER,
+    total_towers INTEGER DEFAULT 0,
+    total_flats INTEGER DEFAULT 0,
+    created_by UUID REFERENCES profiles(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Towers/Wings within societies
+CREATE TABLE wings (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    society_id UUID NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    name VARCHAR(100) NOT NULL,
+    description TEXT,
+    total_floors INTEGER DEFAULT 0,
+    created_by UUID REFERENCES profiles(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(society_id, name)
+);
+
+-- Flats/Units within wings
+CREATE TABLE flats (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    wing_id UUID NOT NULL REFERENCES wings(id) ON DELETE CASCADE,
+    flat_number VARCHAR(20) NOT NULL,
+    floor_number INTEGER,
+    bhk_configuration VARCHAR(10), -- e.g., '1BHK', '2BHK', '3BHK'
+    square_feet INTEGER,
+    status VARCHAR(20) DEFAULT 'available' CHECK (status IN ('available', 'occupied', 'vacant', 'maintenance')),
+    owner_id UUID REFERENCES profiles(id), -- Reference to owner
+    tenant_id UUID REFERENCES profiles(id), -- Reference to tenant (if rented)
+    monthly_rent DECIMAL(10,2),
+    maintenance_fee DECIMAL(10,2) DEFAULT 0.00,
+    created_by UUID REFERENCES profiles(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(wing_id, flat_number)
+);
+
+-- Society members/residents
+CREATE TABLE members (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    profile_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    society_id UUID NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    wing_id UUID REFERENCES wings(id) ON DELETE SET NULL,
+    flat_id UUID REFERENCES flats(id) ON DELETE SET NULL,
+    relationship_with_head VARCHAR(50) DEFAULT 'self', -- self, spouse, child, parent, etc.
+    blood_group VARCHAR(5),
+    date_of_birth DATE,
+    gender VARCHAR(10) CHECK (gender IN ('male', 'female', 'other')),
+    emergency_contact_name VARCHAR(255),
+    emergency_contact_phone VARCHAR(20),
+    vehicle_number VARCHAR(20),
+    vehicle_type VARCHAR(50),
+    pet_details TEXT,
+    occupation VARCHAR(100),
+    annual_income DECIMAL(15,2),
+    is_approved BOOLEAN DEFAULT FALSE,
+    approval_date TIMESTAMP WITH TIME ZONE,
+    approved_by UUID REFERENCES profiles(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(profile_id, society_id)
+);
+
+-- Notifications/Announcements
+CREATE TABLE notifications (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    society_id UUID REFERENCES societies(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    notification_type VARCHAR(50) DEFAULT 'announcement' CHECK (notification_type IN ('announcement', 'alert', 'event', 'maintenance', 'payment')),
+    priority VARCHAR(20) DEFAULT 'normal' CHECK (priority IN ('low', 'normal', 'high', 'urgent')),
+    target_audience VARCHAR(50) DEFAULT 'all' CHECK (target_audience IN ('all', 'residents', 'owners', 'tenants', 'staff')),
+    is_active BOOLEAN DEFAULT TRUE,
+    starts_at TIMESTAMP WITH TIME ZONE,
+    ends_at TIMESTAMP WITH TIME ZONE,
+    created_by UUID REFERENCES profiles(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Maintenance requests/tickets
+CREATE TABLE maintenance_requests (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    society_id UUID NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    flat_id UUID REFERENCES flats(id) ON DELETE SET NULL,
+    reported_by UUID NOT NULL REFERENCES profiles(id),
+    assigned_to UUID REFERENCES profiles(id),
+    category VARCHAR(100) NOT NULL, -- plumbing, electrical, carpentry, etc.
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    priority VARCHAR(20) DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
+    status VARCHAR(20) DEFAULT 'open' CHECK (status IN ('open', 'in_progress', 'resolved', 'closed', 'rejected')),
+    estimated_cost DECIMAL(10,2),
+    actual_cost DECIMAL(10,2),
+    scheduled_date TIMESTAMP WITH TIME ZONE,
+    completed_date TIMESTAMP WITH TIME ZONE,
+    resolution_notes TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Visitor management
+CREATE TABLE visitors (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    society_id UUID NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    flat_id UUID REFERENCES flats(id) ON DELETE SET NULL,
+    visitor_name VARCHAR(255) NOT NULL,
+    visitor_phone VARCHAR(20),
+    visitor_id_proof_type VARCHAR(50), -- Aadhar, PAN, Passport, etc.
+    visitor_id_proof_number VARCHAR(50),
+    visitor_id_proof_image_url TEXT,
+    purpose_of_visit TEXT,
+    vehicle_number VARCHAR(20),
+    vehicle_type VARCHAR(50),
+    host_name VARCHAR(255),
+    host_phone VARCHAR(20),
+    check_in_time TIMESTAMP WITH TIME ZONE NOT NULL,
+    check_out_time TIMESTAMP WITH TIME ZONE,
+    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'rejected', 'checked_in', 'checked_out')),
+    requested_by UUID REFERENCES profiles(id), -- Who requested (guard at gate)
+    processed_by UUID REFERENCES profiles(id), -- Which guard processed entry/exit
+    remarks TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Complaints/Grievances
+CREATE TABLE complaints (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    society_id UUID NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    filed_by UUID NOT NULL REFERENCES profiles(id),
+    against_uuid UUID REFERENCES profiles(id), -- Complaint against specific person
+    flat_id UUID REFERENCES flats(id) ON DELETE SET NULL,
+    category VARCHAR(100) NOT NULL, -- noise, parking, maintenance, behaviour, etc.
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    priority VARCHAR(20) DEFAULT 'medium' CHECK (priority IN ('low', 'medium', 'high', 'urgent')),
+    status VARCHAR(20) DEFAULT 'open' CHECK (status IN ('open', 'in_progress', 'resolved', 'closed', 'rejected')),
+    resolution TEXT,
+    resolved_by UUID REFERENCES profiles(id),
+    resolved_at TIMESTAMP WITH TIME ZONE,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Community events
+CREATE TABLE events (
+    TABLE events (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    society_id UUID NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    title VARCHAR(255) NOT NULL,
+    description TEXT,
+    event_date DATE NOT NULL,
+    start_time TIME,
+    end_time TIME,
+    location VARCHAR(255),
+    organizer_uuid UUID REFERENCES profiles(id),
+    max_attendees INTEGER,
+    registration_required BOOLEAN DEFAULT FALSE,
+    registration_deadline DATE,
+    status VARCHAR(20) DEFAULT 'planned' CHECK (status IN ('planned', 'ongoing', 'completed', 'cancelled')),
+    created_by UUID REFERENCES profiles(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Event registrations/attendance
+CREATE TABLE event_attendees (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+    profile_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+    rsvp_status VARCHAR(20) DEFAULT 'pending' CHECK (rsvp_status IN ('pending', 'confirmed', 'maybe', 'declined')),
+    attended BOOLEAN DEFAULT FALSE,
+    feedback_rating INTEGER CHECK (feedback_rating >= 1 AND feedback_rating <= 5),
+    feedback_comments TEXT,
+    registered_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(event_id, profile_id)
+);
+
+-- Payments/Transactions
+CREATE TABLE payments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    society_id UUID NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    payer_uuid UUID NOT NULL REFERENCES profiles(id),
+    payee_uuid UUID REFERENCES profiles(id), -- For refunds or transfers
+    amount DECIMAL(12,2) NOT NULL CHECK (amount >= 0),
+    currency VARCHAR(3) DEFAULT 'INR',
+    payment_type VARCHAR(50) NOT NULL, -- maintenance, fine, booking, penalty, etc.
+    payment_method VARCHAR(50), -- cash, card, upi, netbanking, etc.
+    transaction_id VARCHAR(255), -- External transaction ID from payment gateway
+    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'completed', 'failed', 'refunded', 'cancelled')),
+    description TEXT,
+    due_date DATE,
+    paid_date TIMESTAMP WITH TIME ZONE,
+    late_fee DECIMAL(10,2) DEFAULT 0.00,
+    tax_amount DECIMAL(10,2) DEFAULT 0.00,
+    created_by UUID REFERENCES profiles(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Facilities/Amenities
+CREATE TABLE facilities (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    society_id UUID NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    name VARCHAR(255) NOT NULL,
+    description TEXT,
+    category VARCHAR(100), -- gym, pool, park, hall, etc.
+    location_description TEXT,
+    capacity INTEGER,
+    operating_hours_start TIME,
+    operating_hours_end TIME,
+    days_open VARCHAR(50), -- e.g., 'Monday-Sunday', 'Weekends only'
+    maintenance_schedule TEXT,
+    is_active BOOLEAN DEFAULT TRUE,
+    booking_required BOOLEAN DEFAULT FALSE,
+    hourly_rate DECIMAL(10,2),
+    daily_rate DECIMAL(10,2),
+    created_by UUID REFERENCES profiles(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Facility bookings
+CREATE TABLE facility_bookings (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    facility_id UUID NOT NULL REFERENCES facilities(id) ON DELETE CASCADE,
+    booked_by_uuid UUID NOT NULL REFERENCES profiles(id),
+    society_id UUID NOT NULL REFERENCES societies(id) ON DELETE CASCADE,
+    booking_date DATE NOT NULL,
+    start_time TIME NOT NULL,
+    end_time TIME NOT NULL,
+    purpose VARCHAR(255),
+    guest_count INTEGER DEFAULT 0,
+    special_requirements TEXT,
+    amount_paid DECIMAL(10,2),
+    status VARCHAR(20) DEFAULT 'pending' CHECK (status IN ('pending', 'confirmed', 'completed', 'cancelled', 'no_show')),
+    booked_by UUID REFERENCES profiles(id),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Documents/Files
+CREATE TABLE documents (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    society_id UUID REFERENCES societies(id) ON DELETE CASCADE,
+    uploaded_by UUID NOT NULL REFERENCES profiles(id),
+    related_to_uuid UUID, -- Generic reference to any entity (flat, member, event, etc.)
+    related_to_type VARCHAR(50), -- Type of entity (flat, member, event, etc.)
+    file_name VARCHAR(255) NOT NULL,
+    file_path VARCHAR(500) NOT NULL,
+    file_size INTEGER, -- in bytes
+    file_type VARCHAR(100), -- MIME type
+    description TEXT,
+    is_public BOOLEAN DEFAULT FALSE,
+    access_level VARCHAR(20) DEFAULT 'private' CHECK (access_level IN ('private', 'society', 'public')),
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Audit trail for important changes
+CREATE TABLE audit_log (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    table_name VARCHAR(100) NOT NULL,
+    record_id UUID NOT NULL,
+    action VARCHAR(10) NOT NULL CHECK (action IN ('INSERT', 'UPDATE', 'DELETE')),
+    changed_by UUID REFERENCES profiles(id),
+    changes JSONB, -- Store what changed
+    ip_address INET,
+    user_agent TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Indexes for better performance
+CREATE INDEX idx_profiles_email ON profiles(email);
+CREATE INDEX idx_profiles_role ON profiles(role);
+CREATE INDEX idx_wings_society_id ON wings(society_id);
+CREATE INDEX idx_flats_wing_id ON flats(wing_id);
+CREATE INDEX idx_flats_status ON flats(status);
+CREATE INDEX idx_members_profile_id ON members(profile_id);
+CREATE INDEX idx_members_society_id ON members(society_id);
+CREATE INDEX idx_members_flat_id ON members(flat_id);
+CREATE INDEX idx_notifications_society_id ON notifications(society_id);
+CREATE INDEX idx_notifications_created_at ON notifications(created_at);
+CREATE INDEX idx_maintenance_society_id ON maintenance_requests(society_id);
+CREATE INDEX idx_maintenance_status ON maintenance_requests(status);
+CREATE INDEX idx_maintenance_reported_by ON maintenance_requests(reported_by);
+CREATE INDEX idx_visitors_society_id ON visitors(society_id);
+CREATE INDEX idx_visitors_flat_id ON visitors(flat_id);
+CREATE INDEX idx_visitors_check_in_time ON visitors(check_in_time);
+CREATE INDEX idx_complaints_society_id ON complaints(society_id);
+CREATE INDEX idx_complaints_filed_by ON complaints(filed_by);
+CREATE INDEX idx_complaints_status ON complaints(status);
+CREATE INDEX idx_events_society_id ON events(society_id);
+CREATE INDEX idx_events_event_date ON events(event_date);
+CREATE INDEX idx_events_status ON events(status);
+CREATE INDEX idx_payments_society_id ON payments(society_id);
+CREATE INDEX idx_payments_payer_uuid ON payments(payer_uuid);
+CREATE INDEX idx_payments_status ON payments(status);
+CREATE INDEX idx_payments_payment_type ON payments(payment_type);
+CREATE INDEX idx_facilities_society_id ON facilities(society_id);
+CREATE INDEX idx_facility_bookings_facility_id ON facility_bookings(facility_id);
+CREATE INDEX idx_facility_bookings_booked_by_uuid ON facility_bookings(booked_by_uuid);
+CREATE INDEX idx_documents_society_id ON documents(society_id);
+CREATE INDEX idx_documents_uploaded_by ON documents(uploaded_by);
+CREATE INDEX idx_audit_log_table_name ON audit_log(table_name);
+CREATE INDEX idx_audit_log_created_at ON audit_log(created_at);
+
+-- Triggers for updated_at timestamps
+CREATE OR REPLACE FUNCTION update_updated_at_column()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.updated_at = CURRENT_TIMESTAMP;
+    RETURN NEW;
+END;
+$$ language 'plpgsql';
+
+-- Apply trigger to all tables that need updated_at tracking
+DO $$
+DECLARE
+    tables TEXT[] := ARRAY[
+        'profiles', 'societies', 'wings', 'flats', 'members',
+        'notifications', 'maintenance_requests', 'visitors',
+        'complaints', 'events', 'payments', 'facilities',
+        'facility_bookings', 'documents'
+    ];
+    table_name TEXT;
+BEGIN
+    FOREACH table_name IN ARRAY tables LOOP
+        EXECUTE format(
+            'DROP TRIGGER IF EXISTS update_%s_updated_at ON %s;
+             CREATE TRIGGER update_%s_updated_at
+             BEFORE UPDATE ON %s
+             FOR EACH ROW
+             EXECUTE FUNCTION update_updated_at_column();',
+            table_name, table_name, table_name, table_name
+        );
+    END LOOP;
+END $$;
+
+-- Insert some initial data for testing
+INSERT INTO societies (name, address, city, state, postal_code, contact_number, email)
+VALUES
+('Green Valley Society', '123 Green Valley Road', 'Mumbai', 'Maharashtra', '400001', '+91-22-12345678', 'info@greenvalley.coop'),
+('Sunrise Heights', '45 Sunrise Avenue', 'Delhi', 'Delhi', '110001', '+91-11-98765432', 'contact@sunriseheights.org');
+
+-- Insert an admin user (password: admin123)
+INSERT INTO profiles (email, password_hash, full_name, role, status, email_verified)
+VALUES
+('admin@portl.com', '$2b$10$8Kfk9zgViAliJy4.HSQZ0uEd/vwCRjen.CcAQyuJYGIj6x.Uजीклम', 'System Administrator', 'admin', 'active', true);
+
+-- Assign admin to societies
+INSERT INTO members (profile_id, society_id, relationship_with_head, is_approved, approval_date)
+SELECT p.id, s.id, 'self', true, NOW()
+FROM profiles p, societies s
+WHERE p.email = 'admin@portl.com';
